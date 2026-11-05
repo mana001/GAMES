@@ -307,23 +307,41 @@ client.on('messageCreate', async message => {
     const contentLower = content.toLowerCase().trim();
 
     if (content.includes('DAI LI')) {
-        const daiLiIntro = `🪨 ATTENTION, CITIZEN. 🪨
-Welcome to the Taboo Division of the Dai Li.
-I am your agent, and I will be overseeing today’s game. Please remain calm. Everything here is perfectly orderly.
-Your mission, should you choose to accept it:
+        const daiLiIntro = `!startgame [Team1] vs [Team2] 
 
-Describe the secret word to your teammates. But beware: certain words are forbidden. Say one, and I will know.
-Rules of the Realm:
 
-🔒 The Describer sees the secret word and the forbidden words.
+# 🪨 BY ORDER OF THE DAI LI 🪨
 
-🗣️ The Describer must give clues without speaking any forbidden word.
+**ATTENTION, CITIZENS.** *Yes, you. Especially you.*
 
-🕵️ Guessers, work together to uncover the secret word.
+Welcome to the **Taboo Division** of the Dai Li. I am your Agent, your host, and your *only* friend. And I will be overseeing today’s game.
 
-⚠️ Say a forbidden word, and you will be reported to the authorities. You will be taken to a very nice place. Do not ask where.
-There is no cheating in this game. There is no confusion. There is only Taboo.
-The Dai Li is always watching. Good luck, citizens. 🪨`;
+Please remain calm. Everything here is *perfectly* orderly.
+
+> ## 📜 THE LAWS OF TABOO 📜
+
+**Law #1:** The **Describer** receives the *secret word* and the *forbidden words*. They are now the most important person in the realm. Do not let it go to their head though👀.
+
+**Law #2:** The Describer must make the guessers say the secret word **WITHOUT** speaking a single forbidden word.
+
+**Law #3:** Guessers must guess the word. Quickly. The Dai Li is **very busy** and has a tight schedule of *surveillance*.
+
+**Law #4:** Say a forbidden word, and I will know. **I always know.** You will be escorted to a lovely, peaceful location with *no windows and no exit.* Do not ask questions. The questions are also forbidden.
+
+GOT IT? GET IN LINE NOW.
+
+> ## 🏆 VICTORY & DEFEAT 🏆
+
+**Win?** *Excellent.* The Dai Li is **very proud** of you. This will be noted in your file.
+
+**Lose?** *Also noted.* In your file. It is a LARGE file.
+
+**Complain?** There is **no** complaints department. There is only **ME.** 👁️
+
+There is no cheating in my city. There is no confusion. There is no lag. *(If there is lag, it is the fault of the Fire Nation.)*
+
+**All hail the Dai Li. All hail Taboo.**
+*Now go. Describe. Guess. Obey.* 🪨`;
 
         return message.reply({
             content: daiLiIntro,
