@@ -1,13 +1,12 @@
 {
   "name": "discord-taboo-bot",
   "version": "1.0.0",
-  "description": "Taboo and Catch Phrase Discord Bot",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "discord.js": "^14.14.0",
-    "dotenv": "^16.4.5"
+    "discord.js": "^14.14.1",
+    "express": "^4.19.2"
   }
 }
