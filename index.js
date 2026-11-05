@@ -4,7 +4,8 @@ const {
     SlashCommandBuilder, 
     REST, 
     Routes, 
-    EmbedBuilder 
+    EmbedBuilder,
+    PermissionsBitField 
 } = require('discord.js');
 
 const client = new Client({
@@ -108,6 +109,24 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply({ embeds: [embed] });
 
     } else if (commandName === 'taboo') {
+        // PERMISSION CHECKER
+        const botMember = guild.members.cache.get(client.user.id) || await guild.members.fetch(client.user.id);
+        const requiredPerms = [
+            { perm: PermissionsBitField.Flags.ManageNicknames, name: 'Manage Nicknames' },
+            { perm: PermissionsBitField.Flags.ManageRoles, name: 'Manage Roles' },
+            { perm: PermissionsBitField.Flags.ManageMessages, name: 'Manage Messages' },
+            { perm: PermissionsBitField.Flags.AddReactions, name: 'Add Reactions' }
+        ];
+
+        const missing = requiredPerms.filter(p => !botMember.permissions.has(p.perm));
+        if (missing.length > 0) {
+            const missingList = missing.map(m => `• **${m.name}**`).join('\n');
+            return interaction.reply({
+                content: `⚠️ **Missing Bot Permissions!**\nI cannot run the game properly because I am missing the following server permissions:\n${missingList}\n\nPlease update my role permissions in Server Settings and try again!`,
+                ephemeral: true
+            });
+        }
+
         if (activeGames.has(channelId)) {
             return interaction.reply({ content: '⚠️ A round is already active in this channel!', ephemeral: true });
         }
@@ -131,14 +150,19 @@ client.on('interactionCreate', async interaction => {
         let member;
         try {
             member = await guild.members.fetch(describerUser.id);
-            await member.setNickname('🧭 Joo Dee').catch(() => {});
+            await member.setNickname('🧭 Joo Dee');
+            
             let guideRole = guild.roles.cache.find(r => r.name === 'THE GUIDE');
             if (!guideRole) {
                 guideRole = await guild.roles.create({ name: 'THE GUIDE', color: '#ff4757', reason: 'Taboo Bot Role' });
             }
-            await member.roles.add(guideRole).catch(() => {});
+            await member.roles.add(guideRole);
         } catch (err) {
-            console.error('Could not update nickname/roles:', err);
+            console.error('Role/Nickname assignment error:', err);
+            return interaction.reply({
+                content: `❌ **Hierarchy Error:** I couldn't assign the nickname or role to <@${describerUser.id}>. Make sure my bot role is dragged **above** 'THE GUIDE' role in your Server Settings!`,
+                ephemeral: true
+            });
         }
 
         activeGames.set(channelId, {
@@ -247,7 +271,7 @@ client.on('messageCreate', async message => {
     // 3. Describer Message Checks
     if (message.author.id === game.describerId) {
 
-        // IF THE DESCRIBER HAS ALREADY REACHED 3 DESCRIPTIONS: BLOCK THEM
+        // If describer tries typing after 3 messages, block them instantly and show warning
         if (game.descriptionsCount >= game.maxDescriptions) {
             await message.delete().catch(() => {});
             return message.channel.send(`Calm your horses Joo Dee. Your turn is over for now. <@${message.author.id}>`);
@@ -273,9 +297,9 @@ client.on('messageCreate', async message => {
             return message.reply({ embeds: [tabooEmbed] });
         }
 
-        // Increment description count
+        // Increment description count and add checkmark
         game.descriptionsCount += 1;
-        await message.react('✅');
+        await message.react('✅').catch(() => {});
     }
 });
 
