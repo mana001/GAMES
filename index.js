@@ -21,7 +21,6 @@ app.get('/', (req, res) => {
 app.listen(PORT, () => {
     console.log(`Keep-alive web server active on port ${PORT}`);
 
-    // Self-ping loop fires every 4 minutes automatically
     const targetUrl = process.env.RAILWAY_STATIC_URL 
         ? `http://${process.env.RAILWAY_STATIC_URL}` 
         : `http://localhost:${PORT}`;
@@ -48,9 +47,10 @@ const client = new Client({
 const activeGames = new Map();
 const guildScores = new Map();
 
-function getGuildScores(guildId) {
+function getGuildGame(guildId) {
     if (!guildScores.has(guildId)) {
         guildScores.set(guildId, { 
+            gameStarted: false,
             team1Name: 'Team 1', 
             team1Score: 0, 
             team1Members: new Set(),
@@ -82,13 +82,8 @@ client.once('ready', async () => {
 
     const commands = [
         new SlashCommandBuilder()
-            .setName('setteams')
-            .setDescription('Set custom names for Team 1 and Team 2')
-            .addStringOption(option => option.setName('team1').setDescription('Name for Team 1').setRequired(true))
-            .addStringOption(option => option.setName('team2').setDescription('Name for Team 2').setRequired(true)),
-        new SlashCommandBuilder()
             .setName('taboo')
-            .setDescription('Start a Taboo round')
+            .setDescription('Start a Taboo round (Requires active game session)')
             .addStringOption(option => option.setName('word').setDescription('Target word').setRequired(true))
             .addStringOption(option => option.setName('taboos').setDescription('Taboo words separated by commas').setRequired(true))
             .addIntegerOption(option => 
@@ -103,22 +98,10 @@ client.once('ready', async () => {
             .addIntegerOption(option => 
                 option.setName('team').setDescription('Team playing').setRequired(true)
                     .addChoices({ name: 'Team 1', value: 1 }, { name: 'Team 2', value: 2 }))
-            .addIntegerOption(option => 
-                option.setName('rounds').setDescription('Total rounds for the match (5-10)').setRequired(true)
-                    .addChoices(
-                        { name: '5 Rounds', value: 5 },
-                        { name: '6 Rounds', value: 6 },
-                        { name: '7 Rounds', value: 7 },
-                        { name: '8 Rounds', value: 8 },
-                        { name: '9 Rounds', value: 9 },
-                        { name: '10 Rounds', value: 10 }
-                    ))
-            .addStringOption(option => option.setName('team1_name').setDescription('Override Team 1').setRequired(false))
-            .addStringOption(option => option.setName('team2_name').setDescription('Override Team 2').setRequired(false))
             .addIntegerOption(option => option.setName('plus').setDescription('Points for correct').setRequired(false))
             .addIntegerOption(option => option.setName('minus').setDescription('Points deducted for taboo').setRequired(false)),
         new SlashCommandBuilder().setName('scores').setDescription('View scores'),
-        new SlashCommandBuilder().setName('resetscores').setDescription('Reset scores')
+        new SlashCommandBuilder().setName('resetscores').setDescription('Reset scores / End game')
     ];
 
     const rest = new REST({ version: '10' }).setToken(process.env.DISCORD_TOKEN);
@@ -133,22 +116,33 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
+    // SECURITY CHECK: Only allow host user '0ladybunny'
+    if (interaction.user.username !== '0ladybunny') {
+        return interaction.reply({ 
+            content: `⛔ **Access Denied:** Only the designated host (**0ladybunny**) is permitted to control the Dai Li game session.`, 
+            ephemeral: true 
+        });
+    }
+
     const { commandName, guildId, channelId, guild } = interaction;
-    const scores = getGuildScores(guildId);
+    const game = getGuildGame(guildId);
 
-    if (commandName === 'setteams') {
-        const t1 = interaction.options.getString('team1').trim();
-        const t2 = interaction.options.getString('team2').trim();
-        scores.team1Name = t1;
-        scores.team2Name = t2;
+    if (commandName === 'taboo') {
+        // CHECK IF GAME SESSION HAS BEEN STARTED VIA !startgame
+        if (!game.gameStarted) {
+            return interaction.reply({ 
+                content: `⚠️ **No Active Game Session!** You must start a game first using the text command:\n\`!startgame [Team1Name], [Team2Name], [TotalRounds]\`\n*Example:* \`!startgame Red Team, Blue Team, 5\``, 
+                ephemeral: true 
+            });
+        }
 
-        const embed = new EmbedBuilder()
-            .setTitle('⚙️ Teams Configured!')
-            .setColor('#70a1ff')
-            .setDescription(`**Team 1:** ${t1}\n**Team 2:** ${t2}`);
-        return interaction.reply({ embeds: [embed] });
+        if (game.currentRound >= game.totalRounds) {
+            return interaction.reply({ 
+                content: `🏁 **Match Completed!** All ${game.totalRounds} rounds have finished. Use \`/resetscores\` to start a new game!`, 
+                ephemeral: true 
+            });
+        }
 
-    } else if (commandName === 'taboo') {
         const botMember = guild.members.cache.get(client.user.id) || await guild.members.fetch(client.user.id);
         const requiredPerms = [
             { perm: PermissionsBitField.Flags.ManageNicknames, name: 'Manage Nicknames' },
@@ -176,17 +170,9 @@ client.on('interactionCreate', async interaction => {
         const timerSeconds = interaction.options.getInteger('timer');
         const describerUser = interaction.options.getUser('describer');
         const teamNumber = interaction.options.getInteger('team');
-        const selectedRounds = interaction.options.getInteger('rounds');
         
-        scores.totalRounds = selectedRounds;
-        scores.currentRound += 1;
-
-        const team1NameInput = interaction.options.getString('team1_name');
-        const team2NameInput = interaction.options.getString('team2_name');
-        if (team1NameInput) scores.team1Name = team1NameInput.trim();
-        if (team2NameInput) scores.team2Name = team2NameInput.trim();
-
-        const activeTeamName = teamNumber === 1 ? scores.team1Name : scores.team2Name;
+        game.currentRound += 1;
+        const activeTeamName = teamNumber === 1 ? game.team1Name : game.team2Name;
         const plusPoints = interaction.options.getInteger('plus') ?? 1;
         const minusPoints = interaction.options.getInteger('minus') ?? 1;
 
@@ -224,14 +210,14 @@ client.on('interactionCreate', async interaction => {
         });
 
         const publicEmbed = new EmbedBuilder()
-            .setTitle(`🚨 TABOO ROUND ${scores.currentRound}/${scores.totalRounds} 🚨`)
+            .setTitle(`🚨 TABOO ROUND ${game.currentRound}/${game.totalRounds} 🚨`)
             .setColor('#ff4757')
             .addFields(
                 { name: 'Active Team', value: `${activeTeamName}`, inline: true },
                 { name: 'Describer', value: `<@${describerUser.id}> (🧭 Joo Dee)`, inline: true },
                 { name: 'Timer', value: `${timerSeconds} Seconds`, inline: true },
                 { name: 'Points Config', value: `+${plusPoints} correct | -${minusPoints} taboo`, inline: false },
-                { name: 'Status', value: `🔒 Secret word & taboo list have been whispered privately to <@${describerUser.id}>!`, inline: false },
+                { name: 'Status', value: `🔒 Secret word & taboo list whispered privately to <@${describerUser.id}>!`, inline: false },
                 { name: 'Rules', value: `Max **3 descriptions**. Type **correct** when guessed or **incorrect** to pass.`, inline: false }
             );
 
@@ -244,7 +230,7 @@ client.on('interactionCreate', async interaction => {
                 .addFields(
                     { name: 'Target Word to Describe', value: `**${word.toUpperCase()}**`, inline: false },
                     { name: 'Forbidden (Taboo) Words', value: tabooList.join(', '), inline: false },
-                    { name: 'Instructions', value: `You are **🧭 Joo Dee** for this round! Describe the target word to your team without saying any of the forbidden words. You have **3 descriptions** max!`, inline: false }
+                    { name: 'Instructions', value: `You are **🧭 Joo Dee** for this round! Describe the target word without saying forbidden words. (Max 3 descriptions)`, inline: false }
                 );
             await describerUser.send({ embeds: [secretEmbed] });
         } catch (dmErr) {
@@ -255,7 +241,7 @@ client.on('interactionCreate', async interaction => {
                     { name: 'Target Word', value: `**${word.toUpperCase()}**`, inline: false },
                     { name: 'Forbidden Words', value: tabooList.join(', '), inline: false }
                 );
-            await interaction.followUp({ content: `<@${describerUser.id}>, I couldn't DM you (DMs closed)! Here is your secret word:`, embeds: [fallbackEmbed], ephemeral: true });
+            await interaction.followUp({ content: `<@${describerUser.id}>, DMs closed! Secret word:`, embeds: [fallbackEmbed], ephemeral: true });
         }
 
         const timeout = setTimeout(async () => {
@@ -265,8 +251,8 @@ client.on('interactionCreate', async interaction => {
                 activeGames.delete(channelId);
                 
                 let roundText = `Time ran out for **${activeTeamName}**! The secret word was **${word.toUpperCase()}**.`;
-                if (scores.currentRound >= scores.totalRounds) {
-                    roundText += `\n\n🏁 **MATCH OVER!** Final Scores:\n🏆 **${scores.team1Name}:** ${scores.team1Score} pts\n🏆 **${scores.team2Name}:** ${scores.team2Score} pts`;
+                if (game.currentRound >= game.totalRounds) {
+                    roundText += `\n\n🏁 **MATCH OVER!** Final Scores:\n🏆 **${game.team1Name}:** ${game.team1Score} pts\n🏆 **${game.team2Name}:** ${game.team2Score} pts`;
                 }
 
                 const timeEmbed = new EmbedBuilder()
@@ -281,19 +267,20 @@ client.on('interactionCreate', async interaction => {
 
     } else if (commandName === 'scores') {
         const scoreEmbed = new EmbedBuilder()
-            .setTitle(`🏆 Current Scoreboard (Round ${scores.currentRound}/${scores.totalRounds})`)
+            .setTitle(`🏆 Current Scoreboard (Round ${game.currentRound}/${game.totalRounds})`)
             .setColor('#2ed573')
             .addFields(
-                { name: scores.team1Name, value: `${scores.team1Score} points`, inline: true },
-                { name: scores.team2Name, value: `${scores.team2Score} points`, inline: true }
+                { name: game.team1Name, value: `${game.team1Score} points`, inline: true },
+                { name: game.team2Name, value: `${game.team2Score} points`, inline: true }
             );
         await interaction.reply({ embeds: [scoreEmbed] });
 
     } else if (commandName === 'resetscores') {
-        scores.team1Score = 0;
-        scores.team2Score = 0;
-        scores.currentRound = 0;
-        await interaction.reply({ content: `🔄 Scores and round counters have been reset.` });
+        game.team1Score = 0;
+        game.team2Score = 0;
+        game.currentRound = 0;
+        game.gameStarted = false;
+        await interaction.reply({ content: `🔄 Game session ended, scores and round counters have been reset.` });
     }
 });
 
@@ -302,15 +289,56 @@ client.on('messageCreate', async message => {
 
     const channelId = message.channel.id;
     const game = activeGames.get(channelId);
-    const scores = getGuildScores(message.guild.id);
+    const guildGame = getGuildGame(message.guild.id);
     const content = message.content;
     const contentLower = content.toLowerCase().trim();
 
+    // --- HOST SECURITY CHECK FOR ADMIN TEXT COMMANDS ---
+    const isHost = message.author.username === '0ladybunny';
+
+    // --- START GAME COMMAND (Plain text) ---
+    // Format: !startgame Team1Name, Team2Name, TotalRounds
+    // Example: !startgame Red Team, Blue Team, 6
+    if (contentLower.startsWith('!startgame')) {
+        if (!isHost) {
+            return message.reply('⛔ Only **0ladybunny** can start a game session.');
+        }
+
+        const args = content.replace('!startgame', '').trim().split(',');
+        if (args.length < 3) {
+            return message.reply('⚠️ Invalid format! Use: `!startgame [Team1Name], [Team2Name], [TotalRounds]`\n*Example:* `!startgame Team Alpha, Team Beta, 5`');
+        }
+
+        guildGame.team1Name = args[0].trim();
+        guildGame.team2Name = args[1].trim();
+        const roundsInput = parseInt(args[2].trim());
+
+        if (isNaN(roundsInput) || roundsInput < 5 || roundsInput > 10) {
+            return message.reply('⚠️ Total rounds must be a number between **5 and 10**!');
+        }
+
+        guildGame.totalRounds = roundsInput;
+        guildGame.currentRound = 0;
+        guildGame.team1Score = 0;
+        guildGame.team2Score = 0;
+        guildGame.gameStarted = true;
+
+        const startEmbed = new EmbedBuilder()
+            .setTitle('🪨 DAI LI TABOO GAME STARTED! 🪨')
+            .setColor('#70a1ff')
+            .setDescription(`A new game session has been initialized by host **0ladybunny**!`)
+            .addFields(
+                { name: 'Team 1', value: guildGame.team1Name, inline: true },
+                { name: 'Team 2', value: guildGame.team2Name, inline: true },
+                { name: 'Total Rounds', value: `${guildGame.totalRounds} Rounds`, inline: false },
+                { name: 'Next Step', value: `You can now use \`/taboo\` to begin Round 1!`, inline: false }
+            );
+        return message.reply({ embeds: [startEmbed] });
+    }
+
+    // --- DAI LI INTRO TRIGGER ---
     if (content.includes('DAI LI')) {
-        const daiLiIntro = `!startgame [Team1] vs [Team2] 
-
-
-# 🪨 BY ORDER OF THE DAI LI 🪨
+        const daiLiIntro = `# 🪨 BY ORDER OF THE DAI LI 🪨
 
 **ATTENTION, CITIZENS.** *Yes, you. Especially you.*
 
@@ -351,57 +379,61 @@ There is no cheating in my city. There is no confusion. There is no lag. *(If th
         });
     }
 
+    // --- TEAM & ROSTER COMMANDS ---
     if (contentLower.startsWith('!team1')) {
+        if (!isHost) return message.reply('⛔ Only **0ladybunny** can manage team rosters.');
         const mentions = message.mentions.users;
-        if (mentions.size === 0) return message.reply('⚠️ Please mention members to add to Team 1! Example: `!team1 @User`');
+        if (mentions.size === 0) return message.reply('⚠️ Please mention members for Team 1! Example: `!team1 @User`');
         mentions.forEach(u => {
-            scores.team1Members.add(u.id);
-            scores.team2Members.delete(u.id);
+            guildGame.team1Members.add(u.id);
+            guildGame.team2Members.delete(u.id);
         });
-        const teamList = Array.from(scores.team1Members).map(id => `<@${id}>`).join(', ');
-        return message.reply(`✅ **${scores.team1Name}** members: ${teamList}`);
+        const teamList = Array.from(guildGame.team1Members).map(id => `<@${id}>`).join(', ');
+        return message.reply(`✅ **${guildGame.team1Name}** members: ${teamList}`);
     }
 
     if (contentLower.startsWith('!team2')) {
+        if (!isHost) return message.reply('⛔ Only **0ladybunny** can manage team rosters.');
         const mentions = message.mentions.users;
-        if (mentions.size === 0) return message.reply('⚠️ Please mention members to add to Team 2! Example: `!team2 @User`');
+        if (mentions.size === 0) return message.reply('⚠️ Please mention members for Team 2! Example: `!team2 @User`');
         mentions.forEach(u => {
-            scores.team2Members.add(u.id);
-            scores.team1Members.delete(u.id);
+            guildGame.team2Members.add(u.id);
+            guildGame.team1Members.delete(u.id);
         });
-        const teamList = Array.from(scores.team2Members).map(id => `<@${id}>`).join(', ');
-        return message.reply(`✅ **${scores.team2Name}** members: ${teamList}`);
+        const teamList = Array.from(guildGame.team2Members).map(id => `<@${id}>`).join(', ');
+        return message.reply(`✅ **${guildGame.team2Name}** members: ${teamList}`);
     }
 
     if (contentLower.startsWith('!swap')) {
+        if (!isHost) return message.reply('⛔ Only **0ladybunny** can swap team members.');
         const userToSwap = message.mentions.users.first();
         if (!userToSwap) return message.reply('⚠️ Please mention a user to swap! Example: `!swap @User`');
         
         const userId = userToSwap.id;
         let movedTo = '';
 
-        if (scores.team1Members.has(userId)) {
-            scores.team1Members.delete(userId);
-            scores.team2Members.add(userId);
-            movedTo = scores.team2Name;
+        if (guildGame.team1Members.has(userId)) {
+            guildGame.team1Members.delete(userId);
+            guildGame.team2Members.add(userId);
+            movedTo = guildGame.team2Name;
         } else {
-            scores.team2Members.delete(userId);
-            scores.team1Members.add(userId);
-            movedTo = scores.team1Name;
+            guildGame.team2Members.delete(userId);
+            guildGame.team1Members.add(userId);
+            movedTo = guildGame.team1Name;
         }
         return message.reply(`🔄 Swapped <@${userId}> over to **${movedTo}**!`);
     }
 
     if (contentLower === '!teams') {
-        const t1List = Array.from(scores.team1Members).map(id => `<@${id}>`).join(', ') || 'None';
-        const t2List = Array.from(scores.team2Members).map(id => `<@${id}>`).join(', ') || 'None';
+        const t1List = Array.from(guildGame.team1Members).map(id => `<@${id}>`).join(', ') || 'None';
+        const t2List = Array.from(guildGame.team2Members).map(id => `<@${id}>`).join(', ') || 'None';
 
         const embed = new EmbedBuilder()
             .setTitle('👥 Team Rosters')
             .setColor('#70a1ff')
             .addFields(
-                { name: scores.team1Name, value: t1List, inline: true },
-                { name: scores.team2Name, value: t2List, inline: true }
+                { name: guildGame.team1Name, value: t1List, inline: true },
+                { name: guildGame.team2Name, value: t2List, inline: true }
             );
         return message.reply({ embeds: [embed] });
     }
@@ -414,21 +446,21 @@ There is no cheating in my city. There is no confusion. There is no lag. *(If th
         activeGames.delete(channelId);
 
         let finalMsg = winEmbed;
-        if (scores.currentRound >= scores.totalRounds) {
+        if (guildGame.currentRound >= guildGame.totalRounds) {
             finalMsg.addFields({ 
                 name: '🏁 MATCH OVER!', 
-                value: `Final Scores:\n🏆 **${scores.team1Name}:** ${scores.team1Score} pts\n🏆 **${scores.team2Name}:** ${scores.team2Score} pts` 
+                value: `Final Scores:\n🏆 **${guildGame.team1Name}:** ${guildGame.team1Score} pts\n🏆 **${guildGame.team2Name}:** ${guildGame.team2Score} pts` 
             });
         }
         return message.reply({ embeds: [finalMsg] });
     }
 
     if (contentLower === 'correct') {
-        if (game.team === 1) scores.team1Score += game.plusPoints;
-        else scores.team2Score += game.plusPoints;
+        if (game.team === 1) guildGame.team1Score += game.plusPoints;
+        else guildGame.team2Score += game.plusPoints;
 
         const winEmbed = new EmbedBuilder()
-            .setTitle(`🎉 CORRECT GUESS! (Round ${scores.currentRound}/${scores.totalRounds})`)
+            .setTitle(`🎉 CORRECT GUESS! (Round ${guildGame.currentRound}/${guildGame.totalRounds})`)
             .setColor('#2ed573')
             .setDescription(`**${game.activeTeamName}** guessed **${game.word.toUpperCase()}**! +${game.plusPoints} Points.`);
 
@@ -437,7 +469,7 @@ There is no cheating in my city. There is no confusion. There is no lag. *(If th
 
     if (['incorrect', 'wrong', 'pass'].includes(contentLower)) {
         const failEmbed = new EmbedBuilder()
-            .setTitle(`❌ ROUND ENDED! (Round ${scores.currentRound}/${scores.totalRounds})`)
+            .setTitle(`❌ ROUND ENDED! (Round ${guildGame.currentRound}/${guildGame.totalRounds})`)
             .setColor('#ff6b6b')
             .setDescription(`Round ended for **${game.activeTeamName}**. The secret word was **${game.word.toUpperCase()}**. No points awarded.`);
 
@@ -453,11 +485,11 @@ There is no cheating in my city. There is no confusion. There is no lag. *(If th
         const violatedTaboo = game.taboos.find(taboo => contentLower.includes(taboo));
 
         if (violatedTaboo) {
-            if (game.team === 1) scores.team1Score = Math.max(0, scores.team1Score - game.minusPoints);
-            else scores.team2Score = Math.max(0, scores.team2Score - game.minusPoints);
+            if (game.team === 1) guildGame.team1Score = Math.max(0, guildGame.team1Score - game.minusPoints);
+            else guildGame.team2Score = Math.max(0, guildGame.team2Score - game.minusPoints);
 
             const tabooEmbed = new EmbedBuilder()
-                .setTitle(`❌ TABOO VIOLATION! (Round ${scores.currentRound}/${scores.totalRounds})`)
+                .setTitle(`❌ TABOO VIOLATION! (Round ${guildGame.currentRound}/${guildGame.totalRounds})`)
                 .setColor('#ff4757')
                 .setDescription(`<@${message.author.id}> said forbidden word **"${violatedTaboo}"**!`)
                 .addFields({ name: 'Penalty', value: `**${game.activeTeamName}** loses ${game.minusPoints} point(s). Round over!` });
