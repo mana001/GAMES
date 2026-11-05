@@ -105,7 +105,7 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    const { commandName, guildId, channelId, guild, user: hostUser } = interaction;
+    const { commandName, guildId, channelId, guild } = interaction;
     const scores = getGuildScores(guildId);
 
     if (commandName === 'setteams') {
@@ -195,7 +195,7 @@ client.on('interactionCreate', async interaction => {
             member
         });
 
-        // 1. Send the Public Game Card (Without Target Word or Taboos)
+        // Public Game Card (Hides secret word & taboos)
         const publicEmbed = new EmbedBuilder()
             .setTitle(`🚨 TABOO ROUND ${scores.currentRound}/${scores.totalRounds} 🚨`)
             .setColor('#ff4757')
@@ -210,7 +210,7 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ embeds: [publicEmbed] });
 
-        // 2. Send the Secret Private Whisper Directly to the Describer (via DM so they can see it securely)
+        // Whisper Secret Assignment to Describer
         try {
             const secretEmbed = new EmbedBuilder()
                 .setTitle('🤫 YOUR SECRET TABOO ASSIGNMENT')
@@ -222,7 +222,6 @@ client.on('interactionCreate', async interaction => {
                 );
             await describerUser.send({ embeds: [secretEmbed] });
         } catch (dmErr) {
-            // Fallback if describer has DMs closed: Post an ephemeral follow-up in the channel visible only to them
             const fallbackEmbed = new EmbedBuilder()
                 .setTitle('🤫 YOUR SECRET TABOO ASSIGNMENT')
                 .setColor('#ffa502')
@@ -272,16 +271,46 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Plain Text Command Handler
+// Plain Text Message Handler
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
     const channelId = message.channel.id;
     const game = activeGames.get(channelId);
     const scores = getGuildScores(message.guild.id);
-    const contentLower = message.content.toLowerCase().trim();
+    const content = message.content;
+    const contentLower = content.toLowerCase().trim();
 
-    // --- MID-GAME TEAM & ROSTER COMMANDS (NO SLASHES) ---
+    // --- DAI LI INTRO TRIGGER (Requires "DAI LI" in uppercase anywhere in sentence) ---
+    if (content.includes('DAI LI')) {
+        const daiLiIntro = `🪨 ATTENTION, CITIZEN. 🪨
+Welcome to the Taboo Division of the Dai Li.
+I am your agent, and I will be overseeing today’s game. Please remain calm. Everything here is perfectly orderly.
+Your mission, should you choose to accept it:
+
+Describe the secret word to your teammates. But beware: certain words are forbidden. Say one, and I will know.
+Rules of the Realm:
+
+🔒 The Describer sees the secret word and the forbidden words.
+
+🗣️ The Describer must give clues without speaking any forbidden word.
+
+🕵️ Guessers, work together to uncover the secret word.
+
+⚠️ Say a forbidden word, and you will be reported to the authorities. You will be taken to a very nice place. Do not ask where.
+There is no cheating in this game. There is no confusion. There is only Taboo.
+The Dai Li is always watching. Good luck, citizens. 🪨`;
+
+        return message.reply({
+            content: daiLiIntro,
+            files: ['./daili.gif']
+        }).catch(() => {
+            // Fallback if gif file is missing
+            return message.reply(daiLiIntro);
+        });
+    }
+
+    // --- TEAM & ROSTER COMMANDS (NO SLASHES) ---
 
     if (contentLower.startsWith('!team1')) {
         const mentions = message.mentions.users;
