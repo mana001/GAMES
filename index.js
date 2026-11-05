@@ -8,6 +8,34 @@ const {
     PermissionsBitField 
 } = require('discord.js');
 
+// --- BUILT-IN SELF-PING KEEP-ALIVE SERVER ---
+const express = require('express');
+const http = require('http');
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get('/', (req, res) => {
+    res.send('Dai Li Taboo Bot is online and running 24/7! 🪨');
+});
+
+app.listen(PORT, () => {
+    console.log(`Keep-alive web server active on port ${PORT}`);
+
+    // Self-ping loop fires every 4 minutes automatically
+    const targetUrl = process.env.RAILWAY_STATIC_URL 
+        ? `http://${process.env.RAILWAY_STATIC_URL}` 
+        : `http://localhost:${PORT}`;
+
+    setInterval(() => {
+        http.get(targetUrl, (res) => {
+            console.log(`Internal heartbeat ping sent! Status: ${res.statusCode}`);
+        }).on('error', (err) => {
+            console.error('Heartbeat ping failed:', err.message);
+        });
+    }, 4 * 60 * 1000);
+});
+// --------------------------------------------
+
 const client = new Client({
     intents: [
         GatewayIntentBits.Guilds,
@@ -195,7 +223,6 @@ client.on('interactionCreate', async interaction => {
             member
         });
 
-        // Public Game Card (Hides secret word & taboos)
         const publicEmbed = new EmbedBuilder()
             .setTitle(`🚨 TABOO ROUND ${scores.currentRound}/${scores.totalRounds} 🚨`)
             .setColor('#ff4757')
@@ -210,7 +237,6 @@ client.on('interactionCreate', async interaction => {
 
         await interaction.reply({ embeds: [publicEmbed] });
 
-        // Whisper Secret Assignment to Describer
         try {
             const secretEmbed = new EmbedBuilder()
                 .setTitle('🤫 YOUR SECRET TABOO ASSIGNMENT')
@@ -271,7 +297,6 @@ client.on('interactionCreate', async interaction => {
     }
 });
 
-// Plain Text Message Handler
 client.on('messageCreate', async message => {
     if (message.author.bot) return;
 
@@ -281,7 +306,6 @@ client.on('messageCreate', async message => {
     const content = message.content;
     const contentLower = content.toLowerCase().trim();
 
-    // --- DAI LI INTRO TRIGGER (Requires "DAI LI" in uppercase anywhere in sentence) ---
     if (content.includes('DAI LI')) {
         const daiLiIntro = `🪨 ATTENTION, CITIZEN. 🪨
 Welcome to the Taboo Division of the Dai Li.
@@ -305,12 +329,9 @@ The Dai Li is always watching. Good luck, citizens. 🪨`;
             content: daiLiIntro,
             files: ['./daili.gif']
         }).catch(() => {
-            // Fallback if gif file is missing
             return message.reply(daiLiIntro);
         });
     }
-
-    // --- TEAM & ROSTER COMMANDS (NO SLASHES) ---
 
     if (contentLower.startsWith('!team1')) {
         const mentions = message.mentions.users;
@@ -366,8 +387,6 @@ The Dai Li is always watching. Good luck, citizens. 🪨`;
             );
         return message.reply({ embeds: [embed] });
     }
-
-    // --- GAME CONTROLS ---
 
     if (!game) return;
 
